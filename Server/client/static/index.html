@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FastAPI WebSocket Chat</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; background: #f7f7f8; }
+    h1 { margin-bottom: 0.2em; }
+    .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+    .toolbar input, .toolbar button { padding: 10px 12px; font-size: 1rem; }
+    .toolbar button { cursor: pointer; }
+    #status { font-size: 0.95rem; color: #444; margin-top: 4px; }
+    #chat { border: 1px solid #ccc; border-radius: 10px; background: white; padding: 16px; min-height: 360px; overflow-y: auto; }
+    .message { margin-bottom: 12px; }
+    .message .meta { font-size: 0.84rem; color: #666; margin-bottom: 4px; }
+    .message .text { font-size: 1rem; line-height: 1.5; }
+    .system { color: #0d6efd; font-style: italic; }
+    .input-row { display: flex; gap: 10px; margin-top: 16px; }
+    .input-row textarea { flex: 1; resize: vertical; min-height: 60px; padding: 10px; font-size: 1rem; }
+    .input-row button { padding: 10px 16px; font-size: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>FastAPI WebSocket Chat</h1>
+  <div class="toolbar">
+    <input id="username" type="text" placeholder="Enter username" value="guest" />
+    <input id="password" type="password" placeholder="Enter password" />
+    <button id="registerBtn">Register</button>
+    <button id="loginBtn">Login</button>
+    <button id="connectBtn" disabled>Connect</button>
+    <button id="logoutBtn" disabled>Logout</button>
+    <span id="status">Disconnected</span>
+  </div>
+
+  <div class="toolbar" style="gap: 8px; margin-bottom: 10px;">
+    <strong>Active users:</strong> <span id="activeUsers">none</span>
+  </div>
+
+  <div id="chat">
+    <div id="messages"></div>
+  </div>
+
+  <div class="input-row">
+    <textarea id="messageInput" placeholder="Type a message..." disabled></textarea>
+    <button id="sendBtn" disabled>Send</button>
+  </div>
+
+  <script>
+    const serverHost = window.location.host;
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const roomId = 'general';
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+    const registerBtn = document.getElementById('registerBtn');
+    const loginBtn = document.getElementById('loginBtn');
+    const connectBtn = document.getElementById('connectBtn');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const statusEl = document.getElementById('status');
+    const activeUsersEl = document.getElementById('activeUsers');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const messagesEl = document.getElementById('messages');
+
+    let socket = null;
+    let typingTimeout = null;
+    let authToken = null;
+    let currentUser = null;
+
+    async function postJson(url, body) {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return response.json();
+    }
+
+    function setStatus(text, connected = false) {
+      statusEl.textContent = text;
+      statusEl.style.color = connected ? '#198754' : '#dc3545';
+    }
+
+    function addMessage(message, isSystem = false) {
+      const item = document.createElement('div');
+      item.className = 'message';
+      if (isSystem) {
+        item.classList.add('system');
+        item.textContent = message;
+      } else {
+        item.innerHTML = `<div class="meta">${message.user_id} · ${new Date(message.timestamp).toLocaleTimeString()}</div>` +
+          `<div class="text">${message.text || ''}</div>`;
+      }
+      messagesEl.appendChild(item);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    async function registerUser() {
+      const username = usernameInput.value.trim();
+      const password = passwordInput.value;
+      if (!username || !password) {
+        setStatus('Username and password are required');
+        return;
+      }
+      const result = await postJson('/register', { username, password });
+      if (result.success) {
+        currentUser = result.username;
+        authToken = result.token;
+        connectBtn.disabled = false;
+        logoutBtn.disabled = false;
+        setStatus('Registered and ready to connect', true);
+      } else {
+        setStatus(result.message || 'Registration failed');
+      }
+    }
+
+    async function loginUser() {
+      const username = usernameInput.value.trim();
+      const password = passwordInput.value;
+      if (!username || !password) {
+        setStatus('Username and password are required');
+        return;
+      }
+      const result = await postJson('/login', { username, password });
+      if (result.success) {
+        currentUser = result.username;
+        authToken = result.token;
+        connectBtn.disabled = false;
+        logoutBtn.disabled = false;
+        setStatus('Logged in and ready to connect', true);
+      } else {
+        setStatus(result.message || 'Login failed');
+      }
+    }
+
+    async function updateUserList() {
+      if (!currentUser || !authToken) {
+        activeUsersEl.textContent = 'none';
+        return;
+      }
+      try {
+        const response = await fetch(`/rooms/${roomId}/users`);
+        const data = await response.json();
+        activeUsersEl.textContent = data.users.length ? data.users.join(', ') : 'none';
+      } catch (error) {
+        activeUsersEl.textContent = 'error';
+      }
+    }
+
+    async function logoutUser() {
+      if (!currentUser || !authToken) {
+        setStatus('Not logged in');
+        return;
+      }
+      const result = await postJson('/logout', { username: currentUser, token: authToken });
+      if (result.success) {
+        if (socket) {
+          socket.close();
+          socket = null;
+        }
+        currentUser = null;
+        authToken = null;
+        connectBtn.disabled = true;
+        logoutBtn.disabled = true;
+        messageInput.disabled = true;
+        sendBtn.disabled = true;
+        activeUsersEl.textContent = 'none';
+        setStatus('Logged out', false);
+      } else {
+        setStatus(result.message || 'Logout failed');
+      }
+    }
+
+    function connectChat() {
+      if (!currentUser || !authToken) {
+        setStatus('Please login or register first');
+        return;
+      }
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        return;
+      }
+
+      const wsUrl = `${wsProtocol}://${serverHost}/ws/${roomId}/${encodeURIComponent(currentUser)}?token=${encodeURIComponent(authToken)}`;
+      socket = new WebSocket(wsUrl);
+
+      socket.addEventListener('open', () => {
+        setStatus('Connected', true);
+        messageInput.disabled = false;
+        sendBtn.disabled = false;
+        addMessage(`${currentUser} connected.`, true);
+        updateUserList();
+      });
+
+      socket.addEventListener('message', (event) => {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'message') {
+          addMessage(payload);
+        } else if (payload.type === 'join' || payload.type === 'leave') {
+          addMessage(`${payload.user_id} ${payload.type === 'join' ? 'joined' : 'left'} the chat.`, true);
+        } else if (payload.type === 'typing') {
+          addMessage(`${payload.user_id} is typing...`, true);
+        } else if (payload.type === 'error') {
+          addMessage(`Error: ${payload.text}`, true);
+        }
+        if (payload.type === 'join' || payload.type === 'leave') {
+          updateUserList();
+        }
+      });
+
+      socket.addEventListener('close', () => {
+        setStatus('Disconnected');
+        messageInput.disabled = true;
+        sendBtn.disabled = true;
+        addMessage('Connection closed.', true);
+        activeUsersEl.textContent = 'none';
+      });
+
+      socket.addEventListener('error', () => {
+        setStatus('Connection error');
+      });
+    }
+
+    function sendMessage() {
+      const text = messageInput.value.trim();
+      if (!text || !socket || socket.readyState !== WebSocket.OPEN) return;
+      const payload = {
+        type: 'message',
+        user_id: currentUser,
+        room_id: roomId,
+        text,
+      };
+      socket.send(JSON.stringify(payload));
+      messageInput.value = '';
+    }
+
+    function sendTyping() {
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      socket.send(JSON.stringify({
+        type: 'typing',
+        user_id: currentUser,
+        room_id: roomId,
+      }));
+    }
+
+    registerBtn.addEventListener('click', registerUser);
+    loginBtn.addEventListener('click', loginUser);
+    connectBtn.addEventListener('click', connectChat);
+    logoutBtn.addEventListener('click', logoutUser);
+    sendBtn.addEventListener('click', sendMessage);
+    messageInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage();
+        return;
+      }
+      if (typingTimeout) {
+        clearTimeout(typingTimeout);
+      }
+      typingTimeout = setTimeout(sendTyping, 500);
+    });
+  </script>
+</body>
+</html>
