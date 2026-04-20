@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat App - Login</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .container {
+      background: white;
+      border-radius: 15px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+      padding: 40px;
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 30px;
+      font-size: 2.5rem;
+    }
+    .form-group {
+      margin-bottom: 20px;
+      text-align: left;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      color: #555;
+      font-weight: 500;
+    }
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #e1e5e9;
+      border-radius: 8px;
+      font-size: 16px;
+      transition: border-color 0.3s;
+      box-sizing: border-box;
+    }
+    input[type="text"]:focus, input[type="password"]:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    .btn {
+      width: 100%;
+      padding: 12px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s;
+      margin-bottom: 10px;
+    }
+    .btn:hover {
+      transform: translateY(-2px);
+    }
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .toggle {
+      margin-top: 20px;
+      color: #666;
+    }
+    .toggle a {
+      color: #667eea;
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .toggle a:hover {
+      text-decoration: underline;
+    }
+    .message {
+      margin-top: 15px;
+      padding: 10px;
+      border-radius: 5px;
+      font-weight: 500;
+    }
+    .success {
+      background-color: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    .error {
+      background-color: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    .loading {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #667eea;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-left: 10px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 id="title">Welcome Back</h1>
+    <div id="message"></div>
+    <form id="authForm">
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" required placeholder="Enter your username" />
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" required placeholder="Enter your password" />
+      </div>
+      <button type="submit" class="btn" id="submitBtn">
+        <span id="btnText">Login</span>
+      </button>
+    </form>
+    <div class="toggle">
+      <span id="toggleText">Don't have an account? <a href="#" id="toggleLink">Register here</a></span>
+    </div>
+  </div>
+
+  <script>
+    let isLogin = true;
+
+    const title = document.getElementById('title');
+    const toggleText = document.getElementById('toggleText');
+    const toggleLink = document.getElementById('toggleLink');
+    const btnText = document.getElementById('btnText');
+    const authForm = document.getElementById('authForm');
+    const submitBtn = document.getElementById('submitBtn');
+    const messageDiv = document.getElementById('message');
+
+    function showMessage(message, type) {
+      messageDiv.innerHTML = `<div class="message ${type}">${message}</div>`;
+      setTimeout(() => {
+        messageDiv.innerHTML = '';
+      }, 5000);
+    }
+
+    function setLoading(loading) {
+      submitBtn.disabled = loading;
+      if (loading) {
+        btnText.innerHTML = `${isLogin ? 'Logging in' : 'Registering'}<div class="loading"></div>`;
+      } else {
+        btnText.textContent = isLogin ? 'Login' : 'Register';
+      }
+    }
+
+    toggleLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      isLogin = !isLogin;
+      title.textContent = isLogin ? 'Welcome Back' : 'Join Us';
+      btnText.textContent = isLogin ? 'Login' : 'Register';
+      toggleText.innerHTML = isLogin
+        ? "Don't have an account? <a href=\"#\" id=\"toggleLink\">Register here</a>"
+        : "Already have an account? <a href=\"#\" id=\"toggleLink\">Login here</a>";
+      messageDiv.innerHTML = '';
+    });
+
+    authForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+
+      if (!username || !password) {
+        showMessage('Please fill in all fields', 'error');
+        return;
+      }
+
+      setLoading(true);
+
+      try {
+        const endpoint = isLogin ? '/login' : '/register';
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          // Store auth data
+          localStorage.setItem('authToken', result.token);
+          localStorage.setItem('username', result.username.toLowerCase());
+
+          showMessage(result.message, 'success');
+
+          // Redirect to dashboard after a short delay
+          setTimeout(() => {
+            window.location.href = '/dashboard';
+          }, 1000);
+        } else {
+          showMessage(result.message || 'Authentication failed', 'error');
+        }
+      } catch (error) {
+        showMessage('Network error. Please try again.', 'error');
+      } finally {
+        setLoading(false);
+      }
+    });
+
+    // Check if already logged in
+    window.addEventListener('DOMContentLoaded', () => {
+      const token = localStorage.getItem('authToken');
+      const username = localStorage.getItem('username');
+
+      if (token && username) {
+        // Redirect to dashboard if already authenticated
+        window.location.href = '/dashboard';
+      }
+    });
+  </script>
+</body>
+</html>

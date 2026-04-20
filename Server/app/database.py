@@ -7,18 +7,32 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from dotenv import load_dotenv
 from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, Text, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
+# Load environment variables from .env file
+load_dotenv()
+
 DATABASE_URL = os.getenv("DATABASE_URL", os.getenv("NEON_DATABASE_URL"))
 if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL or NEON_DATABASE_URL environment variable is required")
+    # For development, use SQLite as fallback
+    DATABASE_URL = "sqlite+aiosqlite:///./chat_app.db"
+    print("Warning: No DATABASE_URL set, using SQLite for development")
 
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
 elif DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+elif DATABASE_URL.startswith("sqlite"):
+    pass  # SQLite URL is fine as-is
+
+# Handle sslmode for asyncpg
+connect_args = {}
+if "sslmode=require" in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace("?sslmode=require", "").replace("&sslmode=require", "")
+    connect_args["ssl"] = "require"
 
 SECRET_KEY = os.getenv("SECRET_KEY", "change-this-secret").encode("utf-8")
 
@@ -52,7 +66,7 @@ revoked_tokens = Table(
     Column("revoked_at", DateTime, nullable=False, default=datetime.utcnow),
 )
 
-engine = create_async_engine(DATABASE_URL, future=True)
+engine = create_async_engine(DATABASE_URL, future=True, connect_args=connect_args)
 async_session = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
@@ -173,3 +187,52 @@ async def get_last_messages(room_id: str, limit: int = 50) -> List[Dict[str, Any
         }
         for row in reversed(rows)
     ]
+
+
+async def get_all_users_list() -> List[str]:
+    async with async_session() as session:
+        query = select(users.c.username)
+        result = await session.execute(query)
+        return [row[0] for row in result.fetchall()]
+
+
+async def save_private_message(room_id: str, from_user: str, to_user: str, content: str, timestamp: int) -> None:
+    print(f"Saving private message: room_id={room_id}, from={from_user}, to={to_user}, content={content[:50]}...")
+    async with async_session() as session:
+        await session.execute(
+            insert(messages).values(
+                room_id=room_id,
+                user_id=from_user,
+                event_type='private_message',
+                content=f"{to_user}:{content}",  # Store recipient in content for now
+                timestamp=timestamp,
+            )
+        )
+        await session.commit()
+    print("Private message saved successfully")
+
+
+async def get_private_messages(room_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+    print(f"Retrieving messages for room: {room_id}")
+    async with async_session() as session:
+        query = (
+            select(messages)
+            .where(messages.c.room_id == room_id)
+            .where(messages.c.event_type == 'private_message')
+            .order_by(messages.c.timestamp.desc())
+            .limit(limit)
+        )
+        result = await session.execute(query)
+        rows = result.fetchall()
+        print(f"Found {len(rows)} messages in database for room {room_id}")
+        messages = [
+            {
+                "from": row.user_id,
+                "to": row.content.split(':', 1)[0] if ':' in row.content else '',
+                "text": row.content.split(':', 1)[1] if ':' in row.content else row.content,
+                "timestamp": row.timestamp,
+            }
+            for row in reversed(rows)
+        ]
+        print(f"Returning {len(messages)} processed messages")
+        return messages

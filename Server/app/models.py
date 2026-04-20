@@ -11,14 +11,16 @@ class MessageType(str, Enum):
     typing = 'typing'
     presence = 'presence'
     error = 'error'
+    private_message = 'private_message'
 
 
 class ChatEvent(BaseModel):
     type: MessageType
     user_id: str
-    room_id: str
+    room_id: Optional[str] = None
     text: Optional[str] = None
     timestamp: int = Field(default_factory=lambda: int(datetime.utcnow().timestamp() * 1000))
+    to_user: Optional[str] = None
 
 
 class UserCreate(BaseModel):
