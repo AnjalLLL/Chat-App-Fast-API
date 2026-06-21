@@ -16,3 +16,4 @@ The app automatically converts `postgres://` or `postgresql://` into the async `
 
 This works because `app/main.py` re-exports the actual server app from `Server/app/main.py`.
 
+This is build for purpose of testing websocket persistence stablishing connection and update data in live chat without refreshing page.
